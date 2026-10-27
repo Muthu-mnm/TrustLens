@@ -16,9 +16,8 @@ COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code & config
+# Copy backend application code
 COPY backend/app /app/app
-COPY backend/config /app/config
 
 # Create uploads storage directory
 RUN mkdir -p /app/uploads
