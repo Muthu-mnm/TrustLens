@@ -19,6 +19,7 @@ test_data/samples/
 
 # Environment
 .env
+.firebase/
 
 # Node
 node_modules/
