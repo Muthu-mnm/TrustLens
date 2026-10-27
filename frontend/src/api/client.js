@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 export const api = axios.create({
-  baseURL: 'http://localhost:8000/api',
+  baseURL: import.meta.env?.VITE_API_BASE_URL || '/api',
   timeout: 60000,
   headers: {
     'Accept': 'application/json',
@@ -28,6 +28,7 @@ export const healthCheck = () => api.get('/health')
 export const createApplication = (data) => api.post('/applications', data)
 export const listApplications = () => api.get('/applications')
 export const getApplication = (id) => api.get(`/applications/${id}`)
+export const getDocuments = (appId) => api.get(`/applications/${appId}/documents`)
 export const uploadDocuments = (appId, files) => {
   const formData = new FormData()
   files.forEach(f => formData.append('files', f))
@@ -38,8 +39,10 @@ export const uploadDocuments = (appId, files) => {
 export const analyzeApplication = (id) => api.post(`/applications/${id}/analyze`)
 export const getResults = (id) => api.get(`/applications/${id}/results`)
 export const getAudit = (id) => api.get(`/applications/${id}/audit`)
+export const verifyAudit = (id) => api.get(`/applications/${id}/audit/verify`)
 export const reviewFinding = (findingId, data) => api.post(`/findings/${findingId}/review`, data)
 export const downloadReport = (appId) => api.get(`/applications/${appId}/report`, { responseType: 'blob' })
 export const getDocumentPreview = (docId) => api.get(`/documents/${docId}/preview`)
 
 export default api
+

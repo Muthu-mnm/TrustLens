@@ -201,19 +201,19 @@ def test_get_results(client, sample_pdf_path):
 
 # ── Finding Review ─────────────────────────────────────────────────────────────
 
-def test_review_finding(client, sample_pdf_path):
+# ── Finding Review ─────────────────────────────────────────────────────────────
+
+def test_review_finding(client, sample_incomplete_pdf_path):
     """Verify officer can review a finding and it persists."""
     app_id = _make_app(client, "Review Action College").json()["id"]
-    with open(sample_pdf_path, "rb") as f:
+    with open(sample_incomplete_pdf_path, "rb") as f:
         client.post(
             f"/api/applications/{app_id}/documents",
-            files=[("files", ("doc.pdf", f, "application/pdf"))],
+            files=[("files", ("incomplete.pdf", f, "application/pdf"))],
         )
     analysis = client.post(f"/api/applications/{app_id}/analyze").json()
     findings = analysis.get("findings", [])
-
-    if not findings:
-        pytest.skip("No findings generated for review test - document may be complete")
+    assert len(findings) > 0, "Expected findings from incomplete application document"
 
     finding_id = findings[0]["id"]
     review_res = client.post(
@@ -230,18 +230,51 @@ def test_review_finding(client, sample_pdf_path):
     assert data["reviewed_by"] == "Test Officer"
 
 
-def test_review_invalid_status(client, sample_pdf_path):
-    """Verify invalid review status returns 400."""
-    app_id = _make_app(client, "Invalid Review College").json()["id"]
-    with open(sample_pdf_path, "rb") as f:
+def test_review_dismissal_requires_comment(client, sample_incomplete_pdf_path):
+    """Verify dismissing a finding requires a non-empty officer reason/comment."""
+    app_id = _make_app(client, "Dismissal Reason Test College").json()["id"]
+    with open(sample_incomplete_pdf_path, "rb") as f:
         client.post(
             f"/api/applications/{app_id}/documents",
-            files=[("files", ("doc.pdf", f, "application/pdf"))],
+            files=[("files", ("incomplete.pdf", f, "application/pdf"))],
         )
     analysis = client.post(f"/api/applications/{app_id}/analyze").json()
     findings = analysis.get("findings", [])
-    if not findings:
-        pytest.skip("No findings to test invalid review")
+    assert len(findings) > 0
+    finding_id = findings[0]["id"]
+
+    # Attempt to dismiss without a comment -> should fail with 400
+    bad_res = client.post(
+        f"/api/findings/{finding_id}/review",
+        json={"review_status": "dismissed", "comment": "", "reviewed_by": "Officer Rao"},
+    )
+    assert bad_res.status_code == 400
+    assert "dismissal reason" in bad_res.json()["detail"].lower()
+
+    # Dismiss with a valid reason -> should succeed
+    good_res = client.post(
+        f"/api/findings/{finding_id}/review",
+        json={
+            "review_status": "dismissed",
+            "comment": "Exempted as per AICTE Special Category Circular 2024.",
+            "reviewed_by": "Officer Rao",
+        },
+    )
+    assert good_res.status_code == 200
+    assert good_res.json()["review_status"] == "dismissed"
+
+
+def test_review_invalid_status(client, sample_incomplete_pdf_path):
+    """Verify invalid review status returns 400."""
+    app_id = _make_app(client, "Invalid Review College").json()["id"]
+    with open(sample_incomplete_pdf_path, "rb") as f:
+        client.post(
+            f"/api/applications/{app_id}/documents",
+            files=[("files", ("incomplete.pdf", f, "application/pdf"))],
+        )
+    analysis = client.post(f"/api/applications/{app_id}/analyze").json()
+    findings = analysis.get("findings", [])
+    assert len(findings) > 0
 
     finding_id = findings[0]["id"]
     res = client.post(
@@ -251,7 +284,7 @@ def test_review_invalid_status(client, sample_pdf_path):
     assert res.status_code == 400
 
 
-# ── Audit Trail ───────────────────────────────────────────────────────────────
+# ── Audit Trail & Cryptographic Chain ─────────────────────────────────────────
 
 def test_get_audit(client):
     """Verify audit trail is populated after application creation."""
@@ -262,6 +295,125 @@ def test_get_audit(client):
     assert isinstance(data, list)
     assert len(data) >= 1  # At minimum APPLICATION_CREATED entry
     assert data[0]["action"] == "APPLICATION_CREATED"
+    assert "entry_hash" in data[0]
+    assert "previous_hash" in data[0]
+
+
+def test_audit_chain_verification_and_tamper_detection(client, db):
+    """Verify audit chain verification succeeds for intact chain and detects tampered entries."""
+    from app.models import AuditEntry
+    app_res = _make_app(client, "Audit Chain Verification College").json()
+    app_id = app_res["id"]
+
+    # Verify intact chain
+    verify_res = client.get(f"/api/applications/{app_id}/audit/verify")
+    assert verify_res.status_code == 200
+    v_data = verify_res.json()
+    assert v_data["chain_valid"] is True
+    assert v_data["total_entries"] >= 1
+    assert v_data["tampered_at_index"] is None
+
+    # Simulate database tampering by modifying details of the entry directly
+    entry = db.query(AuditEntry).filter(AuditEntry.application_id == app_id).first()
+    assert entry is not None
+    entry.details = "Tampered details directly injected into database"
+    db.commit()
+
+    # Re-verify -> tampering must be detected
+    tamper_check = client.get(f"/api/applications/{app_id}/audit/verify")
+    assert tamper_check.status_code == 200
+    t_data = tamper_check.json()
+    assert t_data["chain_valid"] is False
+    assert t_data["tampered_at_index"] is not None
+
+
+# ── Document Preview & Safe Storage ───────────────────────────────────────────
+
+def test_document_preview(client, sample_pdf_path):
+    """Verify document preview endpoint returns text preview."""
+    app_id = _make_app(client, "Preview Document College").json()["id"]
+    with open(sample_pdf_path, "rb") as f:
+        up_res = client.post(
+            f"/api/applications/{app_id}/documents",
+            files=[("files", ("preview_test.pdf", f, "application/pdf"))],
+        )
+    assert up_res.status_code == 200
+    docs = up_res.json()
+    assert len(docs) == 1
+    doc_id = docs[0]["id"]
+
+    preview_res = client.get(f"/api/documents/{doc_id}/preview")
+    assert preview_res.status_code == 200
+    prev_data = preview_res.json()
+    assert prev_data["document_id"] == doc_id
+    assert "text_preview" in prev_data
+    assert "ABC College of Engineering" in prev_data["text_preview"]
+
+
+def test_upload_empty_file_rejected(client):
+    """Verify empty 0-byte file is rejected with 400 Bad Request."""
+    app_id = _make_app(client, "Empty File College").json()["id"]
+    empty_stream = io.BytesIO(b"")
+    response = client.post(
+        f"/api/applications/{app_id}/documents",
+        files=[("files", ("empty.pdf", empty_stream, "application/pdf"))],
+    )
+    assert response.status_code == 400
+    assert "empty" in response.json()["detail"].lower()
+
+
+def test_upload_magic_mismatch_rejected(client):
+    """Verify file claiming to be PDF but having text/executable bytes is rejected."""
+    app_id = _make_app(client, "Magic Mismatch College").json()["id"]
+    fake_pdf = io.BytesIO(b"This is not a real PDF file header.")
+    response = client.post(
+        f"/api/applications/{app_id}/documents",
+        files=[("files", ("fake.pdf", fake_pdf, "application/pdf"))],
+    )
+    assert response.status_code == 400
+    assert "signature" in response.json()["detail"].lower()
+
+
+# ── Dual-ID Lookup & Idempotency ──────────────────────────────────────────────
+
+def test_dual_id_lookup(client):
+    """Verify endpoints resolve applications by both database UUID and human-readable app_id."""
+    app_res = _make_app(client, "Dual ID College").json()
+    db_uuid = app_res["id"]
+    human_app_id = app_res["app_id"]
+
+    # Lookup by UUID
+    res1 = client.get(f"/api/applications/{db_uuid}")
+    assert res1.status_code == 200
+    assert res1.json()["id"] == db_uuid
+
+    # Lookup by human app_id
+    res2 = client.get(f"/api/applications/{human_app_id}")
+    assert res2.status_code == 200
+    assert res2.json()["id"] == db_uuid
+
+
+def test_repeat_analysis_idempotent(client, sample_pdf_path):
+    """Verify re-running analysis on an application completes safely without duplicates."""
+    app_id = _make_app(client, "Repeat Analysis College").json()["id"]
+    with open(sample_pdf_path, "rb") as f:
+        client.post(
+            f"/api/applications/{app_id}/documents",
+            files=[("files", ("doc.pdf", f, "application/pdf"))],
+        )
+
+    # First analysis run
+    res1 = client.post(f"/api/applications/{app_id}/analyze")
+    assert res1.status_code == 200
+    fields_count_1 = len(res1.json()["extracted_fields"])
+
+    # Second analysis run
+    res2 = client.post(f"/api/applications/{app_id}/analyze")
+    assert res2.status_code == 200
+    fields_count_2 = len(res2.json()["extracted_fields"])
+
+    # Field count should remain consistent (idempotent overwrite, no runaway growth)
+    assert fields_count_1 == fields_count_2
 
 
 # ── PDF Report ────────────────────────────────────────────────────────────────
@@ -279,3 +431,4 @@ def test_get_report(client, sample_pdf_path):
     assert response.status_code == 200
     assert "pdf" in response.headers.get("content-type", "").lower()
     assert len(response.content) > 100  # Non-empty PDF bytes
+

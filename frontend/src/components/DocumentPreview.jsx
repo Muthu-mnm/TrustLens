@@ -18,6 +18,8 @@ export default function DocumentPreview({ documentId, documentName, onClose }) {
       let textData = ''
       if (typeof response.data === 'string') {
         textData = response.data
+      } else if (response.data?.text_preview) {
+        textData = response.data.text_preview
       } else if (response.data?.text) {
         textData = response.data.text
       } else if (response.data?.content) {

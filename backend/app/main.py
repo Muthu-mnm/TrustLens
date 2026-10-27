@@ -47,6 +47,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -62,7 +63,34 @@ app.include_router(reports.router, prefix="/api/applications", tags=["Reports"])
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/api/health", tags=["Health"])
 def health_check():
-    return {"status": "ok", "version": "1.0.0", "service": "TrustLens API"}
+    db_status = "connected"
+    try:
+        from app.database import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        db_status = f"unhealthy: {e}"
+
+    upload_dir = os.environ.get("UPLOAD_DIR", "./uploads")
+    storage_status = "writable" if os.access(upload_dir, os.W_OK) else "unwritable"
+
+    from app.services.ocr_service import HAVE_TESSERACT
+    tess_status = "available" if HAVE_TESSERACT else "unavailable (graceful fallback active)"
+
+    is_healthy = db_status == "connected" and storage_status == "writable"
+    status_str = "ok" if is_healthy else "degraded"
+
+    return {
+        "status": status_str,
+        "version": "1.0.0",
+        "service": "TrustLens API",
+        "dependencies": {
+            "database": db_status,
+            "storage": storage_status,
+            "tesseract_ocr": tess_status,
+        },
+    }
 
 
 # ── Global exception handler ──────────────────────────────────────────────────

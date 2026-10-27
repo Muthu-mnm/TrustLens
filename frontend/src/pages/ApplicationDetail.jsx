@@ -444,11 +444,14 @@ export default function ApplicationDetail() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {documents.map((doc, idx) => (
+                    {documents.map((doc, idx) => {
+                      const displayHash = doc.file_hash || doc.sha256
+                      const displayName = doc.original_filename || doc.filename || doc.name || `Document_${idx + 1}`
+                      return (
                       <tr key={doc.id || idx} className="hover:bg-slate-50/80 transition-colors">
                         {/* Filename */}
-                        <td className="px-4 py-3 font-semibold text-slate-900 max-w-xs truncate">
-                          {doc.filename || doc.name || `Document_${idx + 1}`}
+                        <td className="px-4 py-3 font-semibold text-slate-900 max-w-xs truncate" title={displayName}>
+                          {displayName}
                         </td>
 
                         {/* Format */}
@@ -472,8 +475,8 @@ export default function ApplicationDetail() {
                         </td>
 
                         {/* SHA-256 Hash Truncated */}
-                        <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
-                          {doc.sha256 ? `${doc.sha256.slice(0, 16)}...` : '4f9a7b...8e1d'}
+                        <td className="px-4 py-3 font-mono text-[11px] text-slate-500" title={displayHash}>
+                          {displayHash ? `${displayHash.slice(0, 16)}...` : 'Pending'}
                         </td>
 
                         {/* Actions */}
@@ -488,7 +491,7 @@ export default function ApplicationDetail() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
@@ -817,7 +820,10 @@ export default function ApplicationDetail() {
 
       {/* TAB 5: AUDIT TRAIL */}
       {activeTab === 'audit' && (
-        <AuditTrail auditEntries={auditLogs} />
+        <AuditTrail
+          auditEntries={auditLogs}
+          applicationId={application?.app_id || application?.id || id}
+        />
       )}
 
       {/* TAB 6: REPORT */}

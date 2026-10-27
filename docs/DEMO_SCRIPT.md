@@ -1,6 +1,6 @@
 # TrustLens Live Demo Script & Judge Q&A Guide
 
-> **Event**: Smart India Hackathon (SIH 2024)  
+> **Event**: Smart India Hackathon (SIH 2026)  
 > **Problem Statement**: SIH26261 (V-Matrix: AICTE Application Document Scrutiny)  
 > **Team**: 5 Members  
 > **Role Distribution**:  

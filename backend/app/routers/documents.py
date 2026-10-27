@@ -1,4 +1,4 @@
-﻿"""Documents router â€“ file upload, listing and preview."""
+"""Documents router â€“ file upload, listing and preview."""
 import hashlib
 import io
 import os
@@ -13,7 +13,8 @@ from typing import List
 
 from app.database import get_db
 from app import models, schemas
-from app.services import ocr_service
+import re
+from app.services import ocr_service, audit_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,39 +32,40 @@ ALLOWED_MIME = {
 }
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
 @router.post("/applications/{app_id}/documents", response_model=List[schemas.DocumentResponse])
 async def upload_documents(
     app_id: str,
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
-    app_obj = db.query(models.Application).filter(models.Application.id == app_id).first()
+    app_obj = db.query(models.Application).filter(
+        (models.Application.id == app_id) | (models.Application.app_id == app_id)
+    ).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found.")
 
-    save_dir = os.path.join(UPLOAD_DIR, app_id)
+    target_app_id = app_obj.id
+    save_dir = os.path.join(UPLOAD_DIR, target_app_id)
     os.makedirs(save_dir, exist_ok=True)
 
     saved_docs = []
     for upload in files:
-        content = await upload.read()
-
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File '{upload.filename}' exceeds {MAX_UPLOAD_MB} MB limit.",
-            )
+        raw_basename = os.path.basename(upload.filename or "uploaded_file")
+        clean_name = re.sub(r"[^\w\.\-]", "_", raw_basename)
+        safe_name = f"{uuid.uuid4().hex}_{clean_name}"
+        file_path = os.path.join(save_dir, safe_name)
 
         content_type = upload.content_type or ""
-        # Try to infer from filename if content_type is generic
-        if content_type == "application/octet-stream" and upload.filename:
+        if (not content_type or content_type == "application/octet-stream") and upload.filename:
             ext = upload.filename.rsplit(".", 1)[-1].lower()
-            ct_map = {"pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                      "png": "image/png", "tiff": "image/tiff", "tif": "image/tiff"}
+            ct_map = {
+                "pdf": "application/pdf",
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "png": "image/png",
+                "tiff": "image/tiff",
+                "tif": "image/tiff",
+            }
             content_type = ct_map.get(ext, content_type)
 
         if content_type not in ALLOWED_MIME:
@@ -72,19 +74,72 @@ async def upload_documents(
                 detail=f"File type '{content_type}' not allowed. Accepted: PDF, JPG, PNG, TIFF.",
             )
 
-        file_hash = _sha256(content)
-        safe_name = f"{uuid.uuid4().hex}_{upload.filename}"
-        file_path = os.path.join(save_dir, safe_name)
+        # Chunked streaming write to enforce upload limit without unbounded memory consumption
+        hasher = hashlib.sha256()
+        file_size = 0
+        header_chunk = b""
 
-        with open(file_path, "wb") as fh:
-            fh.write(content)
+        try:
+            with open(file_path, "wb") as fh:
+                while True:
+                    chunk = await upload.read(65536)
+                    if not chunk:
+                        break
+                    file_size += len(chunk)
+                    if file_size > MAX_UPLOAD_BYTES:
+                        fh.close()
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"File '{raw_basename}' exceeds {MAX_UPLOAD_MB} MB limit.",
+                        )
+                    if len(header_chunk) < 16:
+                        header_chunk += chunk[:16 - len(header_chunk)]
+                    hasher.update(chunk)
+                    fh.write(chunk)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(status_code=500, detail=f"Storage error saving '{raw_basename}': {exc}")
+
+        if file_size == 0:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(status_code=400, detail=f"File '{raw_basename}' is empty (0 bytes).")
+
+        # Validate file header / magic bytes
+        is_valid_header = True
+        if content_type == "application/pdf":
+            is_valid_header = header_chunk.startswith(b"%PDF")
+        elif content_type in ("image/jpeg", "image/jpg"):
+            is_valid_header = header_chunk.startswith(b"\xff\xd8\xff")
+        elif content_type == "image/png":
+            is_valid_header = header_chunk.startswith(b"\x89PNG\r\n\x1a\n")
+        elif content_type == "image/tiff":
+            is_valid_header = header_chunk.startswith(b"II*\x00") or header_chunk.startswith(b"MM\x00*")
+
+        if not is_valid_header:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(
+                status_code=400,
+                detail=f"File signature mismatch for '{raw_basename}'. Declared {content_type} but signature is invalid.",
+            )
+
+        file_hash = hasher.hexdigest()
 
         # Count pages for PDFs
         page_count = 1
         if content_type == "application/pdf":
             try:
-                import pymupdf as fitz  # PyMuPDF (modern import)
-                doc = fitz.open(stream=content, filetype="pdf")
+                try:
+                    import pymupdf as fitz
+                except ImportError:
+                    import fitz
+                doc = fitz.open(file_path)
                 page_count = len(doc)
                 doc.close()
             except Exception:
@@ -92,13 +147,13 @@ async def upload_documents(
 
         doc_obj = models.Document(
             id=str(uuid.uuid4()),
-            application_id=app_id,
+            application_id=target_app_id,
             filename=safe_name,
-            original_filename=upload.filename,
+            original_filename=raw_basename,
             doc_type=ALLOWED_MIME[content_type],
             file_hash=file_hash,
             page_count=page_count,
-            file_size=len(content),
+            file_size=file_size,
             mime_type=content_type,
             status="uploaded",
             created_at=datetime.utcnow(),
@@ -108,15 +163,26 @@ async def upload_documents(
         db.refresh(doc_obj)
         saved_docs.append(doc_obj)
 
+    if saved_docs:
+        audit_service.create_audit_entry(
+            db,
+            target_app_id,
+            "DOCUMENTS_UPLOADED",
+            "system",
+            f"Uploaded {len(saved_docs)} document(s): {', '.join(d.original_filename for d in saved_docs)}."
+        )
+
     return [schemas.DocumentResponse.model_validate(d) for d in saved_docs]
 
 
 @router.get("/applications/{app_id}/documents", response_model=List[schemas.DocumentResponse])
 def list_documents(app_id: str, db: Session = Depends(get_db)):
-    app_obj = db.query(models.Application).filter(models.Application.id == app_id).first()
+    app_obj = db.query(models.Application).filter(
+        (models.Application.id == app_id) | (models.Application.app_id == app_id)
+    ).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found.")
-    docs = db.query(models.Document).filter(models.Document.application_id == app_id).all()
+    docs = db.query(models.Document).filter(models.Document.application_id == app_obj.id).all()
     return [schemas.DocumentResponse.model_validate(d) for d in docs]
 
 
@@ -133,15 +199,25 @@ def preview_document(doc_id: str, db: Session = Depends(get_db)):
     try:
         pages = ocr_service.extract_text(file_path, doc.mime_type or "")
         text = "\n\n--- Page Break ---\n\n".join(p.get("text", "") for p in pages)
+        preview_text = text[:5000] if text else "No text extracted from this document."
         return JSONResponse({
             "document_id": doc_id,
             "filename": doc.original_filename,
             "page_count": len(pages),
-            "text_preview": text[:5000],
+            "text": preview_text,
+            "text_preview": preview_text,
+            "preview": preview_text,
             "truncated": len(text) > 5000,
         })
     except Exception as exc:
         logger.error("Preview error for %s: %s", doc_id, exc)
-        return JSONResponse({"document_id": doc_id, "filename": doc.original_filename,
-                             "text_preview": f"Preview unavailable: {exc}", "truncated": False})
+        err_msg = f"Preview unavailable: {exc}"
+        return JSONResponse({
+            "document_id": doc_id,
+            "filename": doc.original_filename,
+            "text": err_msg,
+            "text_preview": err_msg,
+            "preview": err_msg,
+            "truncated": False,
+        })
 

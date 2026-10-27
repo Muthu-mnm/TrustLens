@@ -70,13 +70,15 @@ def calculate_risk_score(findings: list[dict | Any]) -> dict:
         band = "Critical"
 
     explanation = (
+        f"Advisory Risk Score: {risk_points:.1f}/100 ({band} Risk) | "
         f"Compliance Trust Score: {score:.1f}/100. "
-        f"Total penalty: {risk_points} points based on {len(findings)} detected findings. "
-        f"Assigned Risk Band: {band}."
+        f"Accumulated penalty: {risk_points} pts across {len(findings)} finding(s)."
     )
 
     return {
         "score": round(score, 1),
+        "trust_score": round(score, 1),
+        "risk_score": round(float(risk_points), 1),
         "band": band,
         "breakdown": breakdown,
         "explanation": explanation

@@ -219,6 +219,7 @@ def generate_report(
     app_type = _get_val(application, "app_type", "Engineering & Technology")
     status = _get_val(application, "status", "analyzed")
     risk_score = _get_val(application, "risk_score", 0.0)
+    trust_score = _get_val(application, "trust_score", round(max(0.0, 100.0 - float(risk_score)), 1))
     risk_band = _get_val(application, "risk_band", "Low")
     doc_count = len(documents)
 
@@ -233,7 +234,7 @@ def generate_report(
         ],
         [
             Paragraph("<b>Uploaded Documents:</b>", body_style), Paragraph(f"{doc_count} document(s)", body_style),
-            Paragraph("<b>Risk Band / Score:</b>", body_style), Paragraph(f"<b>{risk_band}</b> ({risk_score}/100)", body_style)
+            Paragraph("<b>Risk Band / Score:</b>", body_style), Paragraph(f"<b>{risk_band}</b> (Risk: {risk_score}/100, Trust: {trust_score}/100)", body_style)
         ]
     ]
 
@@ -348,9 +349,14 @@ def generate_report(
             Paragraph("Assessment Explanation", table_header)
         ],
         [
-            Paragraph("<b>Overall Trust Score</b>", body_style),
+            Paragraph("<b>Advisory Risk Score</b>", body_style),
             Paragraph(f"<b>{risk_score}/100</b>", body_style),
-            Paragraph("Calculated from base 100 with deduction weights per severity level.", body_style)
+            Paragraph("Penalty points aggregated across detected anomalies (0 = Low Risk, 100 = Critical Risk).", body_style)
+        ],
+        [
+            Paragraph("<b>Compliance Trust Score</b>", body_style),
+            Paragraph(f"<b>{trust_score}/100</b>", body_style),
+            Paragraph("Base 100 compliance metric remaining after penalty deductions.", body_style)
         ],
         [
             Paragraph("<b>Risk Classification</b>", body_style),
@@ -387,24 +393,27 @@ def generate_report(
                 Paragraph("Timestamp (UTC)", table_header),
                 Paragraph("Actor", table_header),
                 Paragraph("Action", table_header),
-                Paragraph("Details", table_header)
+                Paragraph("Details & Hash Chain", table_header)
             ]
         ]
-        for a in audit_entries[:10]:
+        for a in audit_entries[:15]:
             ts = _get_val(a, "timestamp") or _get_val(a, "created_at")
             ts_str = ts.strftime("%Y-%m-%d %H:%M") if isinstance(ts, datetime) else str(ts)[:16]
             actor = _get_val(a, "actor", "System")
             action = _get_val(a, "action", "Action")
             details = _get_val(a, "details", "")
+            prev_h = _get_val(a, "previous_hash") or _get_val(a, "prev_hash") or ""
+            entry_h = _get_val(a, "entry_hash") or _get_val(a, "hash") or ""
+            hash_info = f"<br/><font size='7' color='#64748b'>Block: {entry_h[:16]}... | Prev: {prev_h[:16]}...</font>" if entry_h else ""
 
             audit_data.append([
                 Paragraph(ts_str, body_style),
                 Paragraph(f"<b>{actor}</b>", body_style),
                 Paragraph(action, body_style),
-                Paragraph(str(details)[:150], body_style)
+                Paragraph(f"{str(details)[:140]}{hash_info}", body_style)
             ])
 
-        audit_table = Table(audit_data, colWidths=[100, 100, 120, 220])
+        audit_table = Table(audit_data, colWidths=[90, 85, 115, 250])
         audit_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), c_primary),
             ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e0")),

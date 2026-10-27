@@ -275,7 +275,7 @@ export default function ApplicationNew() {
                 type="text"
                 value={appId}
                 onChange={(e) => setAppId(e.target.value)}
-                placeholder="AICTE-2024-001 (or leave blank to auto-generate)"
+                placeholder="AICTE-2026-001 (or leave blank to auto-generate)"
                 className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white font-mono text-slate-800 transition-all"
               />
               <p className="text-[11px] text-slate-500 mt-1">

@@ -1,14 +1,14 @@
 # TrustLens – Explainable AI Decision-Support for AICTE Application Scrutiny
 
 > **SIH Problem Statement**: SIH26261 – V-Matrix  
-> **Team**: 5 Members | Smart India Hackathon (SIH) 2024  
+> **Team**: 5 Members | Smart India Hackathon (SIH) 2026  
 > **Status**: MVP / Prototype  
 
 ---
 
 > [!CAUTION]
 > **PROTOTYPE – NOT AN OFFICIAL AICTE SYSTEM**  
-> TrustLens is an independent prototype developed exclusively for the Smart India Hackathon (SIH 2024). It is **not** endorsed by, officially affiliated with, or deployed by the All India Council for Technical Education (AICTE). All institutional records, documents, names, and numbers used for demonstrations are synthetic test artifacts generated for evaluation purposes only.
+> TrustLens is an independent prototype developed exclusively for the Smart India Hackathon (SIH 2026). It is **not** endorsed by, officially affiliated with, or deployed by the All India Council for Technical Education (AICTE). All institutional records, documents, names, and numbers used for demonstrations are synthetic test artifacts generated for evaluation purposes only.
 
 ---
 

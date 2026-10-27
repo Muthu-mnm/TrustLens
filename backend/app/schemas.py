@@ -10,6 +10,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "1.0.0"
     service: str = "TrustLens API"
+    dependencies: Optional[dict[str, str]] = None
 
 
 class ErrorResponse(BaseModel):
@@ -96,9 +97,22 @@ class AuditEntryResponse(BaseModel):
     action: str
     actor: str
     details: str
+    previous_hash: Optional[str] = None
+    entry_hash: Optional[str] = None
     timestamp: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AuditVerificationResponse(BaseModel):
+    valid: bool
+    chain_valid: bool
+    total_entries: int
+    verified_entries: int = 0
+    broken_at_index: Optional[int] = None
+    tampered_at_index: Optional[int] = None
+    details: str
+    message: str
 
 
 # ---------------------------------------------------------
@@ -122,6 +136,7 @@ class ApplicationResponse(BaseModel):
     finding_count: int = 0
     risk_score: Optional[float] = 0.0
     risk_band: Optional[str] = "Low"
+    trust_score: Optional[float] = 100.0
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -147,6 +162,7 @@ class AnalysisResultResponse(BaseModel):
     findings: list[FindingResponse] = []
     risk_score: float = 0.0
     risk_band: str = "Low"
+    trust_score: Optional[float] = 100.0
     score_breakdown: dict[str, Any] = Field(default_factory=dict)
     score_explanation: Optional[str] = None
     analyzed_at: Optional[datetime] = None

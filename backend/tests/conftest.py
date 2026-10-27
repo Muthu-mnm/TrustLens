@@ -142,3 +142,44 @@ def sample_image_path():
             os.remove(img_path)
         except Exception:
             pass
+
+
+@pytest.fixture(scope="session")
+def sample_incomplete_pdf_path():
+    """Create a synthetic PDF document lacking mandatory fields to guarantee rule findings."""
+    tmp_dir = tempfile.gettempdir()
+    pdf_path = os.path.join(tmp_dir, "sample_incomplete_doc.pdf")
+    sample_text = (
+        "ANNEXURE - DRAFT NOTES\n"
+        "Meeting Minutes without institutional identity or registration data.\n"
+        "Some observations and rough estimates.\n"
+    )
+
+    try:
+        import fitz
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((50, 72), sample_text, fontsize=11)
+        doc.save(pdf_path)
+        doc.close()
+    except Exception:
+        pdf_bytes = (
+            b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+            b"3 0 obj<</Type/Page/MediaBox[0 0 595 842]/Parent 2 0 R/Contents 4 0 R>>endobj\n"
+            b"4 0 obj<</Length 80>>stream\n"
+            b"BT /F1 10 Tf 50 750 Td (Incomplete Annexure Without Mandatory Fields) Tj ET\nendstream\nendobj\n"
+            b"xref\n0 5\n0000000000 65535 f\n0000000009 00000 n\n0000000056 00000 n\n0000000111 00000 n\n0000000212 00000 n\n"
+            b"trailer<</Size 5/Root 1 0 R>>\nstartxref\n340\n%%EOF"
+        )
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+
+    yield pdf_path
+
+    if os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+        except Exception:
+            pass
+

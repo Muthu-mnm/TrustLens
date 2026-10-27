@@ -78,7 +78,7 @@ export default function ScoreGauge({ score = 0, riskBand = 'Low' }) {
         Composite Risk Assessment
       </div>
 
-      <div className="relative w-64 h-36 flex items-center justify-center">
+      <div className="w-64 h-32 flex items-center justify-center">
         <svg viewBox="0 0 200 115" className="w-full h-full overflow-visible">
           <defs>
             {/* Color Zone Gradients */}
@@ -126,27 +126,30 @@ export default function ScoreGauge({ score = 0, riskBand = 'Low' }) {
             x2={needleX}
             y2={needleY}
             stroke="#0f172a"
-            strokeWidth="3"
+            strokeWidth="3.5"
             strokeLinecap="round"
             className="transition-all duration-700 ease-out"
           />
         </svg>
+      </div>
 
-        {/* Numeric Score */}
-        <div className="absolute bottom-0 text-center flex flex-col items-center">
-          <div className="text-3xl font-extrabold tracking-tight text-slate-900 leading-none">
-            {Math.round(normalizedScore)}
-            <span className="text-base font-normal text-slate-400">/100</span>
-          </div>
+      {/* Numeric Score - Cleanly separated below arc */}
+      <div className="mt-2 text-center flex flex-col items-center">
+        <div className="text-3xl font-black tracking-tight text-slate-900 leading-none">
+          {Math.round(normalizedScore)}
+          <span className="text-base font-medium text-slate-400">/100</span>
         </div>
       </div>
 
-      {/* Band Badge */}
-      <div className="mt-3">
+      {/* Band Badge & Trust Score */}
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
         <span
           className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${style.badgeBg}`}
         >
-          {band} Risk
+          {band} Risk ({Math.round(normalizedScore)}/100)
+        </span>
+        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-800 border border-blue-200">
+          Trust Score: {Math.max(0, 100 - Math.round(normalizedScore))}/100
         </span>
       </div>
 

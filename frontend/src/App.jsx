@@ -6,7 +6,6 @@ import { Toaster } from 'react-hot-toast'
 import { StoreProvider } from './store/useStore'
 
 // Layout & Components
-import DisclaimerBanner from './components/DisclaimerBanner'
 import Sidebar from './components/Layout/Sidebar'
 
 // Pages
@@ -47,16 +46,13 @@ export default function App() {
             }}
           />
 
-          {/* Mandatory Prototype Disclaimer Banner */}
-          <DisclaimerBanner />
-
           {/* Main App Layout: Sidebar + Workspace */}
           <div className="flex flex-1 overflow-hidden">
             {/* Sidebar */}
             <Sidebar />
 
             {/* Scrollable Main Viewport */}
-            <main className="flex-1 overflow-y-auto min-h-[calc(100vh-42px)] p-6 lg:p-8">
+            <main className="flex-1 overflow-y-auto min-h-screen p-6 lg:p-8">
               <div className="max-w-7xl mx-auto">
                 <Routes>
                   <Route path="/" element={<Home />} />

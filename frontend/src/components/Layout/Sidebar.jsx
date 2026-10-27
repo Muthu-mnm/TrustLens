@@ -76,7 +76,7 @@ export default function Sidebar() {
         <div className="text-xs text-slate-400 flex items-center justify-between">
           <span>AI Decision Support</span>
           <span className="px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-900/60 text-[10px] font-semibold">
-            SIH 2024 Demo
+            SIH 2026 Demo
           </span>
         </div>
       </div>

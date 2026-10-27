@@ -1,16 +1,20 @@
-﻿import os
+import os
 import io
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Check for PyMuPDF (fitz)
+# Check for PyMuPDF (fitz) with dual-import fallback
 try:
-    import pymupdf as fitz  # PyMuPDF (modern import)
+    import pymupdf as fitz  # PyMuPDF modern import
     HAVE_FITZ = True
 except ImportError:
-    HAVE_FITZ = False
-    logger.warning("PyMuPDF (fitz) is not installed. PDF text extraction will be limited.")
+    try:
+        import fitz  # PyMuPDF classic import
+        HAVE_FITZ = True
+    except ImportError:
+        HAVE_FITZ = False
+        logger.warning("PyMuPDF (fitz) is not installed. PDF text extraction will be limited.")
 
 # Check for PIL / Pillow
 try:
@@ -20,7 +24,7 @@ except ImportError:
     HAVE_PIL = False
     logger.warning("Pillow is not installed. Image processing will be limited.")
 
-# Check for pytesseract
+# Check for pytesseract and local executable discovery
 try:
     import pytesseract
     HAVE_TESSERACT = True
@@ -28,6 +32,16 @@ try:
     tess_cmd = os.getenv("TESSERACT_CMD")
     if tess_cmd:
         pytesseract.pytesseract.tesseract_cmd = tess_cmd
+    else:
+        # Autodiscover standard Windows install paths if present
+        for candidate in [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+            os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"),
+        ]:
+            if os.path.exists(candidate):
+                pytesseract.pytesseract.tesseract_cmd = candidate
+                break
 except ImportError:
     HAVE_TESSERACT = False
     logger.warning("pytesseract is not installed. OCR will not be available.")

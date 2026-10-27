@@ -35,6 +35,8 @@ UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "./uploads")
 def _app_response(app: models.Application, db: Session) -> schemas.ApplicationResponse:
     doc_count = db.query(models.Document).filter(models.Document.application_id == app.id).count()
     finding_count = db.query(models.Finding).filter(models.Finding.application_id == app.id).count()
+    risk_val = app.risk_score if app.risk_score is not None else 0.0
+    trust_val = round(max(0.0, 100.0 - risk_val), 1)
     return schemas.ApplicationResponse(
         id=app.id,
         app_id=app.app_id,
@@ -43,8 +45,9 @@ def _app_response(app: models.Application, db: Session) -> schemas.ApplicationRe
         status=app.status,
         created_at=app.created_at,
         updated_at=app.updated_at,
-        risk_score=app.risk_score,
-        risk_band=app.risk_band,
+        risk_score=risk_val,
+        trust_score=trust_val,
+        risk_band=app.risk_band or "Low",
         document_count=doc_count,
         finding_count=finding_count,
     )
@@ -82,7 +85,9 @@ def list_applications(db: Session = Depends(get_db)):
 
 @router.get("/{app_id}", response_model=schemas.ApplicationResponse)
 def get_application(app_id: str, db: Session = Depends(get_db)):
-    app_obj = db.query(models.Application).filter(models.Application.id == app_id).first()
+    app_obj = db.query(models.Application).filter(
+        (models.Application.id == app_id) | (models.Application.app_id == app_id)
+    ).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found.")
     return _app_response(app_obj, db)
@@ -90,11 +95,14 @@ def get_application(app_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{app_id}/analyze", response_model=schemas.AnalysisResultResponse)
 def analyze_application(app_id: str, db: Session = Depends(get_db)):
-    app_obj = db.query(models.Application).filter(models.Application.id == app_id).first()
+    app_obj = db.query(models.Application).filter(
+        (models.Application.id == app_id) | (models.Application.app_id == app_id)
+    ).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found.")
 
-    docs = db.query(models.Document).filter(models.Document.application_id == app_id).all()
+    target_app_id = app_obj.id
+    docs = db.query(models.Document).filter(models.Document.application_id == target_app_id).all()
     if not docs:
         raise HTTPException(status_code=400, detail="No documents uploaded for this application.")
 
@@ -107,7 +115,7 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
     db.query(models.ExtractedField).filter(
         models.ExtractedField.document_id.in_([d.id for d in docs])
     ).delete(synchronize_session=False)
-    db.query(models.Finding).filter(models.Finding.application_id == app_id).delete(synchronize_session=False)
+    db.query(models.Finding).filter(models.Finding.application_id == target_app_id).delete(synchronize_session=False)
     db.commit()
 
     all_findings: list[dict] = []
@@ -117,12 +125,25 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
 
     # ── Step 1-4: OCR + Field Extraction per document ────────────────────────
     for doc in docs:
-        file_path = os.path.join(UPLOAD_DIR, app_id, doc.filename)
+        file_path = os.path.join(UPLOAD_DIR, target_app_id, doc.filename)
         if not os.path.exists(file_path):
             logger.warning("File not found: %s", file_path)
             doc.status = "error"
             doc.error_message = "File not found on disk."
             db.commit()
+            all_findings.append({
+                "application_id": target_app_id,
+                "document_id": doc.id,
+                "finding_type": "compliance",
+                "severity": "medium",
+                "title": f"Document Not Found: {doc.original_filename}",
+                "description": f"File '{doc.original_filename}' missing from upload storage.",
+                "evidence": f"File path {file_path} not found.",
+                "rule_id": "SYS-001",
+                "rule_version": "1.0",
+                "field_name": "",
+                "page_number": 0,
+            })
             continue
 
         doc.status = "processing"
@@ -144,7 +165,12 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
                     created_at=datetime.utcnow(),
                 )
                 db.add(ef)
-                all_extracted.append({**f, "document_id": doc.id, "document_filename": doc.original_filename})
+                all_extracted.append({
+                    **f,
+                    "id": ef.id,
+                    "document_id": doc.id,
+                    "document_filename": doc.original_filename
+                })
 
             doc_field_sets.append({
                 "document_id": doc.id,
@@ -159,18 +185,14 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
                 "mime_type": doc.mime_type or "",
             })
 
-            # ── Step 5: Mandatory field validation ───────────────────────────
-            val_findings = validation_service.validate_mandatory_fields(fields, doc.id, doc.original_filename)
-            all_findings.extend(val_findings)
-
             # ── Step 8b: ELA for images ──────────────────────────────────────
             if doc.mime_type and doc.mime_type.startswith("image/"):
-                ela_dir = os.path.join(UPLOAD_DIR, app_id, "ela")
+                ela_dir = os.path.join(UPLOAD_DIR, target_app_id, "ela")
                 os.makedirs(ela_dir, exist_ok=True)
                 ela_result = ela_service.run_ela(file_path, ela_dir)
                 if ela_result.get("anomaly_detected"):
                     all_findings.append({
-                        "application_id": app_id,
+                        "application_id": target_app_id,
                         "document_id": doc.id,
                         "finding_type": "ela_anomaly",
                         "severity": "medium",
@@ -198,31 +220,54 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
             doc.status = "error"
             doc.error_message = str(exc)[:500]
             db.commit()
+            all_findings.append({
+                "application_id": target_app_id,
+                "document_id": doc.id,
+                "finding_type": "compliance",
+                "severity": "medium",
+                "title": f"Document Processing Warning: {doc.original_filename}",
+                "description": f"Automated text extraction encountered an error: {str(exc)[:200]}. Manual officer inspection recommended.",
+                "evidence": f"File '{doc.original_filename}' processing status set to error.",
+                "rule_id": "DOC-ERR-001",
+                "rule_version": "1.0",
+                "field_name": "",
+                "page_number": 0,
+            })
 
     db.commit()
 
+    # ── Step 5: Mandatory field validation across application dossier ────────
+    val_findings = validation_service.validate_mandatory_fields(
+        all_extracted,
+        application_id=target_app_id,
+        filename=docs[0].original_filename if len(docs) == 1 else "Application Dossier"
+    )
+    for vf in val_findings:
+        vf["application_id"] = target_app_id
+    all_findings.extend(val_findings)
+
     # ── Step 6: Cross-document comparison ────────────────────────────────────
     if len(doc_field_sets) > 1:
-        mismatch_findings = comparison_service.compare_documents(doc_field_sets)
+        mismatch_findings = comparison_service.compare_documents(doc_field_sets, application_id=target_app_id)
         for mf in mismatch_findings:
-            mf["application_id"] = app_id
+            mf["application_id"] = target_app_id
         all_findings.extend(mismatch_findings)
 
     # ── Step 7: Duplicate detection ──────────────────────────────────────────
-    dup_findings = duplicate_service.check_exact_duplicates(doc_info_for_dup)
+    dup_findings = duplicate_service.check_exact_duplicates(doc_info_for_dup, application_id=target_app_id)
     for df in dup_findings:
-        df["application_id"] = app_id
+        df["application_id"] = target_app_id
     all_findings.extend(dup_findings)
 
-    perc_findings = duplicate_service.check_perceptual_duplicates(doc_info_for_dup)
+    perc_findings = duplicate_service.check_perceptual_duplicates(doc_info_for_dup, application_id=target_app_id)
     for pf in perc_findings:
-        pf["application_id"] = app_id
+        pf["application_id"] = target_app_id
     all_findings.extend(perc_findings)
 
     # ── Step 9: Compliance rules ──────────────────────────────────────────────
-    rule_findings = rule_engine.evaluate_rules(all_extracted, {"id": app_id, "app_type": app_obj.app_type})
+    rule_findings = rule_engine.evaluate_rules(all_extracted, {"id": target_app_id, "app_type": app_obj.app_type})
     for rf in rule_findings:
-        rf["application_id"] = app_id
+        rf["application_id"] = target_app_id
     all_findings.extend(rule_findings)
 
     # ── Step 10-11: Save findings + score ────────────────────────────────────
@@ -230,7 +275,7 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
     for fd in all_findings:
         finding = models.Finding(
             id=str(uuid.uuid4()),
-            application_id=fd.get("application_id", app_id),
+            application_id=fd.get("application_id", target_app_id),
             document_id=fd.get("document_id"),
             finding_type=fd.get("finding_type", "compliance"),
             severity=fd.get("severity", "info"),
@@ -249,22 +294,23 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
     db.commit()
 
     score_result = scoring_service.calculate_risk_score(all_findings)
-    app_obj.risk_score = score_result["score"]
+    app_obj.risk_score = score_result["risk_score"]
     app_obj.risk_band = score_result["band"]
     app_obj.status = "analyzed"
     app_obj.updated_at = datetime.utcnow()
     db.commit()
 
     audit_service.create_audit_entry(
-        db, app_id, "ANALYSIS_COMPLETED", "system",
+        db, target_app_id, "ANALYSIS_COMPLETED", "system",
         f"Analysis complete. Findings: {len(saved_findings)}. "
-        f"Risk score: {score_result['score']:.1f} ({score_result['band']})."
+        f"Risk score: {score_result['risk_score']:.1f} ({score_result['band']}). "
+        f"Trust score: {score_result['trust_score']:.1f}."
     )
 
     # Build response
     ef_responses = [
         schemas.ExtractedFieldResponse(
-            id=str(uuid.uuid4()),
+            id=e.get("id") or str(uuid.uuid4()),
             document_id=e["document_id"],
             field_name=e["field_name"],
             field_value=e["field_value"],
@@ -276,11 +322,12 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
     finding_responses = [schemas.FindingResponse.model_validate(f) for f in saved_findings]
 
     return schemas.AnalysisResultResponse(
-        application_id=app_id,
+        application_id=target_app_id,
         status="analyzed",
         extracted_fields=ef_responses,
         findings=finding_responses,
-        risk_score=score_result["score"],
+        risk_score=score_result["risk_score"],
+        trust_score=score_result["trust_score"],
         risk_band=score_result["band"],
         score_breakdown=score_result["breakdown"],
         score_explanation=score_result["explanation"],
@@ -289,12 +336,16 @@ def analyze_application(app_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{app_id}/results", response_model=schemas.AnalysisResultResponse)
+@router.get("/{app_id}/findings", response_model=schemas.AnalysisResultResponse, include_in_schema=False)
 def get_results(app_id: str, db: Session = Depends(get_db)):
-    app_obj = db.query(models.Application).filter(models.Application.id == app_id).first()
+    app_obj = db.query(models.Application).filter(
+        (models.Application.id == app_id) | (models.Application.app_id == app_id)
+    ).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found.")
 
-    docs = db.query(models.Document).filter(models.Document.application_id == app_id).all()
+    target_app_id = app_obj.id
+    docs = db.query(models.Document).filter(models.Document.application_id == target_app_id).all()
     doc_ids = [d.id for d in docs]
 
     extracted = db.query(models.ExtractedField).filter(
@@ -302,18 +353,21 @@ def get_results(app_id: str, db: Session = Depends(get_db)):
     ).all() if doc_ids else []
 
     findings = db.query(models.Finding).filter(
-        models.Finding.application_id == app_id
+        models.Finding.application_id == target_app_id
     ).all()
 
     all_findings_dicts = [{"severity": f.severity} for f in findings]
     score_result = scoring_service.calculate_risk_score(all_findings_dicts)
+    resolved_risk_score = app_obj.risk_score if app_obj.risk_score is not None else score_result["risk_score"]
+    resolved_trust_score = round(max(0.0, 100.0 - resolved_risk_score), 1)
 
     return schemas.AnalysisResultResponse(
-        application_id=app_id,
+        application_id=target_app_id,
         status=app_obj.status,
         extracted_fields=[schemas.ExtractedFieldResponse.model_validate(e) for e in extracted],
         findings=[schemas.FindingResponse.model_validate(f) for f in findings],
-        risk_score=app_obj.risk_score or score_result["score"],
+        risk_score=resolved_risk_score,
+        trust_score=resolved_trust_score,
         risk_band=app_obj.risk_band or score_result["band"],
         score_breakdown=score_result["breakdown"],
         score_explanation=score_result["explanation"],
@@ -322,14 +376,27 @@ def get_results(app_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{app_id}/audit", response_model=List[schemas.AuditEntryResponse])
+@router.get("/{app_id}/audit-trail", response_model=List[schemas.AuditEntryResponse], include_in_schema=False)
 def get_audit(app_id: str, db: Session = Depends(get_db)):
-    app_obj = db.query(models.Application).filter(models.Application.id == app_id).first()
+    app_obj = db.query(models.Application).filter(
+        (models.Application.id == app_id) | (models.Application.app_id == app_id)
+    ).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found.")
     entries = (
         db.query(models.AuditEntry)
-        .filter(models.AuditEntry.application_id == app_id)
-        .order_by(models.AuditEntry.created_at.desc())
+        .filter(models.AuditEntry.application_id == app_obj.id)
+        .order_by(models.AuditEntry.created_at.desc(), models.AuditEntry.id.desc())
         .all()
     )
     return [schemas.AuditEntryResponse.model_validate(e) for e in entries]
+
+
+@router.get("/{app_id}/audit/verify", response_model=schemas.AuditVerificationResponse)
+def verify_audit(app_id: str, db: Session = Depends(get_db)):
+    app_obj = db.query(models.Application).filter(
+        (models.Application.id == app_id) | (models.Application.app_id == app_id)
+    ).first()
+    if not app_obj:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    return audit_service.verify_audit_chain(db, app_obj.id)

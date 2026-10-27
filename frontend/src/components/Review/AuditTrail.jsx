@@ -1,8 +1,34 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { Clock, ShieldCheck, UserCheck, FileUp, Sparkles, AlertCircle, FileText, Lock } from 'lucide-react'
+import { Clock, ShieldCheck, UserCheck, FileUp, Sparkles, AlertCircle, FileText, Lock, CheckCircle2, ShieldAlert } from 'lucide-react'
+import { verifyAudit } from '../../api/client'
+import toast from 'react-hot-toast'
 
-export default function AuditTrail({ auditEntries = [] }) {
+export default function AuditTrail({ auditEntries = [], applicationId }) {
+  const [verifying, setVerifying] = useState(false)
+  const [verificationResult, setVerificationResult] = useState(null)
+
+  const handleVerifyChain = async () => {
+    if (!applicationId) {
+      toast.error('Application ID not available for chain verification')
+      return
+    }
+    setVerifying(true)
+    try {
+      const res = await verifyAudit(applicationId)
+      setVerificationResult(res.data)
+      if (res.data?.chain_valid) {
+        toast.success(`Audit chain verified intact! (${res.data.total_entries} records verified)`)
+      } else {
+        toast.error('Audit chain verification failed: possible tampering detected!')
+      }
+    } catch (err) {
+      toast.error(err.message || 'Audit verification request failed')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
   const getActionStyle = (action = '') => {
     const act = action.toUpperCase()
     if (act.includes('CREATED') || act.includes('INITIAL')) {
@@ -68,21 +94,62 @@ export default function AuditTrail({ auditEntries = [] }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
           <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <Lock className="w-4 h-4 text-slate-700" />
             Append-Only Audit Trail
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Immutable sequential record of scrutiny actions, uploads, and officer decisions.
+            Cryptographic SHA-256 hash-chained record of scrutiny actions, uploads, and officer decisions.
           </p>
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-slate-500 font-mono bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200">
-          <span>Total Log Entries:</span>
-          <span className="font-bold text-slate-800">{sortedEntries.length}</span>
+        <div className="flex items-center gap-2.5">
+          {applicationId && (
+            <button
+              type="button"
+              onClick={handleVerifyChain}
+              disabled={verifying}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              <ShieldCheck className={`w-3.5 h-3.5 ${verifying ? 'animate-spin' : 'text-emerald-400'}`} />
+              <span>{verifying ? 'Verifying...' : 'Verify Hash Chain'}</span>
+            </button>
+          )}
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-mono bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200">
+            <span>Entries:</span>
+            <span className="font-bold text-slate-800">{sortedEntries.length}</span>
+          </div>
         </div>
       </div>
+
+      {/* Verification Status Banner (if checked) */}
+      {verificationResult && (
+        <div
+          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+            verificationResult.chain_valid
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            {verificationResult.chain_valid ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            ) : (
+              <ShieldAlert className="w-4 h-4 text-rose-600 flex-shrink-0" />
+            )}
+            <div>
+              <span className="font-bold">
+                {verificationResult.chain_valid ? 'Cryptographic Integrity Confirmed:' : 'Integrity Failure:'}
+              </span>{' '}
+              <span>{verificationResult.message}</span>
+            </div>
+          </div>
+          <span className="text-[11px] font-mono opacity-80">
+            {verificationResult.verified_entries}/{verificationResult.total_entries} Blocks Intact
+          </span>
+        </div>
+      )}
 
       {/* Empty State */}
       {sortedEntries.length === 0 ? (
@@ -105,6 +172,9 @@ export default function AuditTrail({ auditEntries = [] }) {
                 detailsString = String(detailsString)
               }
             }
+
+            const currentHash = entry.entry_hash || entry.hash
+            const prevHash = entry.previous_hash || entry.prev_hash
 
             return (
               <div key={entry.id || index} className="relative group">
@@ -149,14 +219,18 @@ export default function AuditTrail({ auditEntries = [] }) {
                     </div>
                   )}
 
-                  {/* Cryptographic hash info if available */}
-                  {(entry.entry_hash || entry.prev_hash) && (
-                    <div className="pt-2 border-t border-slate-200/60 flex flex-wrap items-center gap-3 text-[10px] text-slate-400 font-mono">
-                      {entry.entry_hash && (
-                        <span>Hash: {entry.entry_hash.slice(0, 16)}...</span>
+                  {/* Cryptographic hash info */}
+                  {(currentHash || prevHash) && (
+                    <div className="pt-2 border-t border-slate-200/60 flex flex-wrap items-center gap-3 text-[10px] text-slate-500 font-mono">
+                      {currentHash && (
+                        <span>
+                          <strong className="text-slate-700">Hash:</strong> {currentHash.slice(0, 16)}...
+                        </span>
                       )}
-                      {entry.prev_hash && (
-                        <span>Prev: {entry.prev_hash.slice(0, 16)}...</span>
+                      {prevHash && (
+                        <span>
+                          <strong className="text-slate-700">Prev:</strong> {prevHash.slice(0, 16)}...
+                        </span>
                       )}
                     </div>
                   )}

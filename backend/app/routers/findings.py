@@ -56,3 +56,11 @@ def review_finding(
     )
 
     return schemas.FindingResponse.model_validate(finding)
+
+
+@router.get("/{finding_id}", response_model=schemas.FindingResponse)
+def get_finding(finding_id: str, db: Session = Depends(get_db)):
+    finding = db.query(models.Finding).filter(models.Finding.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found.")
+    return schemas.FindingResponse.model_validate(finding)
