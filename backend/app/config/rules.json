@@ -1,0 +1,206 @@
+{
+  "version": "demo-1.0",
+  "disclaimer": "These are SAMPLE demonstration rules only. They do not represent official AICTE requirements. Verified rules from the AICTE Approval Process Handbook must be added by qualified personnel with source, effective_date, and verification_status.",
+  "rules": [
+    {
+      "id": "DEMO-001",
+      "version": "1.0",
+      "name": "Institution Name Present",
+      "description": "Application must include a clearly stated institution name",
+      "category": "mandatory_fields",
+      "severity": "high",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "institution_name",
+        "operator": "exists"
+      }
+    },
+    {
+      "id": "DEMO-002",
+      "version": "1.0",
+      "name": "Valid Official Email Format",
+      "description": "Official communication email must follow standard email format",
+      "category": "contact_details",
+      "severity": "medium",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "email",
+        "operator": "regex",
+        "pattern": "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"
+      }
+    },
+    {
+      "id": "DEMO-003",
+      "version": "1.0",
+      "name": "Valid Contact Phone Number",
+      "description": "Official contact phone must contain a valid 10 to 12 digit number",
+      "category": "contact_details",
+      "severity": "medium",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "phone",
+        "operator": "regex",
+        "pattern": "\\b\\d{10,12}\\b"
+      }
+    },
+    {
+      "id": "DEMO-004",
+      "version": "1.0",
+      "name": "Valid 6-Digit Indian Postal Pincode",
+      "description": "Institution address must include a valid 6-digit Indian postal code",
+      "category": "address_details",
+      "severity": "low",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "pincode",
+        "operator": "regex",
+        "pattern": "^[1-9][0-9]{5}$"
+      }
+    },
+    {
+      "id": "DEMO-005",
+      "version": "1.0",
+      "name": "Established Year Range Verification",
+      "description": "Establishment year must be between 1800 and current year (2026)",
+      "category": "establishment",
+      "severity": "medium",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "established_year",
+        "operator": "numeric_range",
+        "min": 1800,
+        "max": 2026
+      }
+    },
+    {
+      "id": "DEMO-006",
+      "version": "1.0",
+      "name": "Sanctioned Intake Greater Than Zero",
+      "description": "Declared student sanctioned intake must be greater than zero",
+      "category": "academic_intake",
+      "severity": "high",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "total_intake",
+        "operator": "greater_than",
+        "value": 0
+      }
+    },
+    {
+      "id": "DEMO-007",
+      "version": "1.0",
+      "name": "University Affiliation Present",
+      "description": "Affiliation details to recognized university/board must be specified",
+      "category": "affiliation",
+      "severity": "high",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "affiliation",
+        "operator": "exists"
+      }
+    },
+    {
+      "id": "DEMO-008",
+      "version": "1.0",
+      "name": "Detailed Campus Address Provided",
+      "description": "Institution campus address must be comprehensive (at least 20 characters)",
+      "category": "address_details",
+      "severity": "medium",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "address",
+        "operator": "min_length",
+        "value": 20
+      }
+    },
+    {
+      "id": "DEMO-009",
+      "version": "1.0",
+      "name": "Principal or Director Name Specified",
+      "description": "Name of the Head of Institution (Director/Principal) must be provided",
+      "category": "governance",
+      "severity": "high",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "director_name",
+        "operator": "exists"
+      }
+    },
+    {
+      "id": "DEMO-010",
+      "version": "1.0",
+      "name": "State Jurisdiction Identified",
+      "description": "State / Union Territory jurisdiction must be identified",
+      "category": "jurisdiction",
+      "severity": "low",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "state",
+        "operator": "exists"
+      }
+    },
+    {
+      "id": "DEMO-011",
+      "version": "1.0",
+      "name": "Programs and Courses Specified",
+      "description": "Academic programs or disciplines offered must be stated",
+      "category": "academic_details",
+      "severity": "medium",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "programs_offered",
+        "operator": "exists"
+      }
+    },
+    {
+      "id": "DEMO-012",
+      "version": "1.0",
+      "name": "Application Identifier Format",
+      "description": "Application number or ID must contain valid alphanumeric characters and symbols",
+      "category": "identification",
+      "severity": "low",
+      "enabled": true,
+      "source": "DEMO - sample rule",
+      "effective_date": "2024-01-01",
+      "verification_status": "unverified_demo",
+      "condition": {
+        "field": "application_id",
+        "operator": "min_length",
+        "value": 3
+      }
+    }
+  ]
+}
