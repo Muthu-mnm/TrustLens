@@ -16,7 +16,13 @@ api.interceptors.request.use(
 
 // Response Interceptor
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Detect if static hosting (Firebase/Vercel) returned HTML fallback instead of real JSON
+    if (typeof response.data === 'string' && response.data.trim().startsWith('<!DOCTYPE')) {
+      return Promise.reject(new Error('Backend API not reachable (received HTML fallback from host).'))
+    }
+    return response
+  },
   (error) => {
     // Standardize error messaging
     const message = error.response?.data?.detail || error.response?.data?.message || error.message || 'API request failed'

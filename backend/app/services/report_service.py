@@ -2,63 +2,110 @@ import io
 import logging
 from datetime import datetime
 from typing import Any
+from xml.sax.saxutils import escape as xml_escape
 
 logger = logging.getLogger(__name__)
 
 FOOTER_TEXT = "PROTOTYPE - NOT OFFICIAL AICTE SYSTEM. Advisory only. Human review required."
 
-try:
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, HRFlowable
-    )
-    from reportlab.pdfgen import canvas
-    HAVE_REPORTLAB = True
-except ImportError:
-    HAVE_REPORTLAB = False
-    logger.warning("reportlab is not installed. PDF generation will use fallback generator.")
+letter = None
+colors = None
+getSampleStyleSheet = None
+ParagraphStyle = None
+SimpleDocTemplate = None
+Paragraph = None
+Spacer = None
+Table = None
+TableStyle = None
+PageBreak = None
+HRFlowable = None
+canvas = None
+HAVE_REPORTLAB = False
 
 
-class NumberedCanvas(canvas.Canvas if HAVE_REPORTLAB else object):
-    """Two-pass canvas to dynamically compute and draw page count and footer."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._saved_page_states = []
+def _ensure_reportlab() -> bool:
+    """Ensure ReportLab is dynamically loaded into module scope."""
+    global HAVE_REPORTLAB, letter, colors, getSampleStyleSheet, ParagraphStyle
+    global SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, HRFlowable, canvas
+    if HAVE_REPORTLAB:
+        return True
+    try:
+        from reportlab.lib.pagesizes import letter as _letter
+        from reportlab.lib import colors as _colors
+        from reportlab.lib.styles import getSampleStyleSheet as _getSampleStyleSheet, ParagraphStyle as _ParagraphStyle
+        from reportlab.platypus import (
+            SimpleDocTemplate as _SimpleDocTemplate, Paragraph as _Paragraph, Spacer as _Spacer,
+            Table as _Table, TableStyle as _TableStyle, PageBreak as _PageBreak, HRFlowable as _HRFlowable
+        )
+        from reportlab.pdfgen import canvas as _canvas
+        letter = _letter
+        colors = _colors
+        getSampleStyleSheet = _getSampleStyleSheet
+        ParagraphStyle = _ParagraphStyle
+        SimpleDocTemplate = _SimpleDocTemplate
+        Paragraph = _Paragraph
+        Spacer = _Spacer
+        Table = _Table
+        TableStyle = _TableStyle
+        PageBreak = _PageBreak
+        HRFlowable = _HRFlowable
+        canvas = _canvas
+        HAVE_REPORTLAB = True
+        return True
+    except ImportError:
+        HAVE_REPORTLAB = False
+        return False
 
-    def showPage(self):
-        self._saved_page_states.append(dict(self.__dict__))
-        self._startPage()
 
-    def save(self):
-        num_pages = len(self._saved_page_states)
-        for state in self._saved_page_states:
-            self.__dict__.update(state)
-            self.draw_page_decorations(num_pages)
-            super().showPage()
-        super().save()
+# Try initial import at module load
+_ensure_reportlab()
 
-    def draw_page_decorations(self, page_count):
-        self.saveState()
-        self.setFont("Helvetica", 8)
-        self.setFillColor(colors.HexColor("#4a5568"))
 
-        # Running header on subsequent pages
-        if self._pageNumber > 1:
-            self.drawString(36, 762, "TrustLens — AICTE Document Scrutiny Evaluation Report")
+def _get_canvas_maker():
+    """Return NumberedCanvas class dynamically subclassing canvas.Canvas."""
+    if not _ensure_reportlab() or canvas is None:
+        return None
+
+    class NumberedCanvas(canvas.Canvas):
+        """Two-pass canvas to dynamically compute and draw page count and footer."""
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            num_pages = len(self._saved_page_states)
+            for state in self._saved_page_states:
+                self.__dict__.update(state)
+                self.draw_page_decorations(num_pages)
+                super().showPage()
+            super().save()
+
+        def draw_page_decorations(self, page_count):
+            self.saveState()
+            self.setFont("Helvetica", 8)
+            self.setFillColor(colors.HexColor("#4a5568"))
+
+            # Running header on subsequent pages
+            if self._pageNumber > 1:
+                self.drawString(36, 762, "TrustLens — AICTE Document Scrutiny Evaluation Report")
+                self.setStrokeColor(colors.HexColor("#cbd5e0"))
+                self.setLineWidth(0.5)
+                self.line(36, 756, 576, 756)
+
+            # Running footer
             self.setStrokeColor(colors.HexColor("#cbd5e0"))
             self.setLineWidth(0.5)
-            self.line(36, 756, 576, 756)
+            self.line(36, 38, 576, 38)
+            self.drawString(36, 26, FOOTER_TEXT)
+            page_str = f"Page {self._pageNumber} of {page_count}"
+            self.drawRightString(576, 26, page_str)
+            self.restoreState()
 
-        # Running footer
-        self.setStrokeColor(colors.HexColor("#cbd5e0"))
-        self.setLineWidth(0.5)
-        self.line(36, 38, 576, 38)
-        self.drawString(36, 26, FOOTER_TEXT)
-        page_str = f"Page {self._pageNumber} of {page_count}"
-        self.drawRightString(576, 26, page_str)
-        self.restoreState()
+    return NumberedCanvas
 
 
 def _get_val(obj: Any, key: str, default: Any = "") -> Any:
@@ -68,22 +115,80 @@ def _get_val(obj: Any, key: str, default: Any = "") -> Any:
     return getattr(obj, key, default)
 
 
-def _generate_fallback_pdf(application_id: str) -> bytes:
-    """Minimal valid PDF fallback in case ReportLab is not available."""
-    content = (
-        f"%PDF-1.4\n"
-        f"1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n"
-        f"2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj\n"
-        f"3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources <<>>>> endobj\n"
-        f"4 0 obj <</Length 180>> stream\n"
-        f"BT /F1 14 Tf 50 720 Td (TrustLens Document Scrutiny Report - {application_id}) Tj\n"
-        f"0 -30 Td /F1 10 Tf ({FOOTER_TEXT}) Tj ET\n"
-        f"endstream\n"
-        f"endobj\n"
-        f"xref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000216 00000 n \n"
-        f"trailer <</Size 5 /Root 1 0 R>>\nstartxref\n440\n%%EOF"
-    )
-    return content.encode("latin1")
+def _safe_xml(text: Any) -> str:
+    """Safely escape text for ReportLab XML/HTML Paragraph rendering."""
+    if text is None:
+        return ""
+    return xml_escape(str(text))
+
+
+def _generate_fallback_pdf(
+    application_id: str,
+    institution_name: str = "AICTE Scrutiny Application",
+    risk_band: str = "Under Review"
+) -> bytes:
+    """Minimal 100% syntactically valid PDF-1.4 fallback with standard fonts and exact xref offsets."""
+    safe_app_id = str(application_id).replace("(", "").replace(")", "")
+    safe_inst = str(institution_name).replace("(", "").replace(")", "")[:60]
+    safe_band = str(risk_band).replace("(", "").replace(")", "")
+
+    lines = [
+        "BT",
+        "/F2 18 Tf",
+        "40 740 Td",
+        "(TrustLens - AICTE Scrutiny Dossier) Tj",
+        "0 -28 Td",
+        "/F1 11 Tf",
+        f"(Application ID: {safe_app_id}) Tj",
+        "0 -20 Td",
+        f"(Institution: {safe_inst}) Tj",
+        "0 -20 Td",
+        f"(Scrutiny Status: Evaluated - Risk Classification: {safe_band}) Tj",
+        "0 -36 Td",
+        "/F2 12 Tf",
+        "(PROTOTYPE ADVISORY - HUMAN REVIEW REQUIRED) Tj",
+        "0 -20 Td",
+        "/F1 9 Tf",
+        "(This scrutiny evaluation was generated by the TrustLens Decision-Support MVP for SIH26261.) Tj",
+        "0 -16 Td",
+        "(It does not constitute an official AICTE sanction or rejection. Human officer review is mandatory.) Tj",
+        "ET"
+    ]
+    stream_content = "\n".join(lines)
+    stream_bytes = stream_content.encode("latin1", "replace")
+    stream_len = len(stream_bytes)
+
+    objects = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>\nendobj\n",
+        f"4 0 obj\n<< /Length {stream_len} >>\nstream\n".encode("latin1") + stream_bytes + b"\nendstream\nendobj\n",
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n"
+    ]
+
+    header = b"%PDF-1.4\n"
+    offsets = [0]
+    current_offset = len(header)
+    parts = [header]
+
+    for obj in objects:
+        offsets.append(current_offset)
+        parts.append(obj)
+        current_offset += len(obj)
+
+    xref_offset = current_offset
+    xref_lines = [f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode("latin1")]
+    for off in offsets[1:]:
+        xref_lines.append(f"{off:010d} 00000 n \n".encode("latin1"))
+
+    trailer = (
+        f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n"
+    ).encode("latin1")
+
+    return b"".join(parts) + b"".join(xref_lines) + trailer
 
 
 def generate_report(
@@ -104,9 +209,11 @@ def generate_report(
     - Section 5: Audit Trail
     """
     app_id = _get_val(application, "app_id") or _get_val(application, "id") or "APP-UNKNOWN"
+    inst_name = _get_val(application, "institution_name", "AICTE Scrutiny Application")
+    risk_band = _get_val(application, "risk_band", "Low")
 
-    if not HAVE_REPORTLAB:
-        return _generate_fallback_pdf(app_id)
+    if not _ensure_reportlab():
+        return _generate_fallback_pdf(app_id, inst_name, risk_band)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -191,9 +298,9 @@ def generate_report(
     # -------------------------------------------------------------
     # Header & Cover Title
     # -------------------------------------------------------------
-    story.append(Paragraph("TrustLens™ AICTE Scrutiny Engine", title_style))
+    story.append(Paragraph("TrustLens — AICTE Scrutiny Engine", title_style))
     gen_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    story.append(Paragraph(f"Application Scrutiny & Explainable Verification Dossier • Generated: {gen_time}", subtitle_style))
+    story.append(Paragraph(f"Application Scrutiny &amp; Explainable Verification Dossier | Generated: {gen_time}", subtitle_style))
 
     # Prominent Disclaimer Callout Box
     disclaimer_html = (
@@ -215,26 +322,24 @@ def generate_report(
     # Section 1: Application Summary
     # -------------------------------------------------------------
     story.append(Paragraph("1. Application Summary", section_heading))
-    inst_name = _get_val(application, "institution_name", "N/A")
     app_type = _get_val(application, "app_type", "Engineering & Technology")
     status = _get_val(application, "status", "analyzed")
     risk_score = _get_val(application, "risk_score", 0.0)
     trust_score = _get_val(application, "trust_score", round(max(0.0, 100.0 - float(risk_score)), 1))
-    risk_band = _get_val(application, "risk_band", "Low")
     doc_count = len(documents)
 
     summary_data = [
         [
-            Paragraph("<b>Application ID:</b>", body_style), Paragraph(str(app_id), body_style),
-            Paragraph("<b>Scrutiny Status:</b>", body_style), Paragraph(str(status).upper(), body_style)
+            Paragraph("<b>Application ID:</b>", body_style), Paragraph(_safe_xml(app_id), body_style),
+            Paragraph("<b>Scrutiny Status:</b>", body_style), Paragraph(_safe_xml(str(status).upper()), body_style)
         ],
         [
-            Paragraph("<b>Institution Name:</b>", body_style), Paragraph(str(inst_name), body_style),
-            Paragraph("<b>Program Type:</b>", body_style), Paragraph(str(app_type), body_style)
+            Paragraph("<b>Institution Name:</b>", body_style), Paragraph(_safe_xml(inst_name), body_style),
+            Paragraph("<b>Program Type:</b>", body_style), Paragraph(_safe_xml(app_type), body_style)
         ],
         [
             Paragraph("<b>Uploaded Documents:</b>", body_style), Paragraph(f"{doc_count} document(s)", body_style),
-            Paragraph("<b>Risk Band / Score:</b>", body_style), Paragraph(f"<b>{risk_band}</b> (Risk: {risk_score}/100, Trust: {trust_score}/100)", body_style)
+            Paragraph("<b>Risk Band / Score:</b>", body_style), Paragraph(f"<b>{_safe_xml(risk_band)}</b> (Risk: {risk_score}/100, Trust: {trust_score}/100)", body_style)
         ]
     ]
 
@@ -270,8 +375,8 @@ def generate_report(
             pg = _get_val(field, "page_number", 1)
 
             fields_data.append([
-                Paragraph(f"<b>{fname}</b>", body_style),
-                Paragraph(str(fval)[:100], body_style),
+                Paragraph(f"<b>{_safe_xml(fname)}</b>", body_style),
+                Paragraph(_safe_xml(str(fval)[:100]), body_style),
                 Paragraph(f"{float(conf)*100:.0f}%", body_style),
                 Paragraph(f"p. {pg}", body_style)
             ])
@@ -311,14 +416,14 @@ def generate_report(
             rstatus = _get_val(f, "review_status", "pending")
 
             sev_color = "#dc2626" if sev == "critical" else "#ea580c" if sev == "high" else "#ca8a04" if sev == "medium" else "#2563eb"
-            sev_html = f"<font color='{sev_color}'><b>{sev.upper()}</b></font>"
+            sev_html = f"<font color='{sev_color}'><b>{_safe_xml(sev.upper())}</b></font>"
 
             findings_data.append([
                 Paragraph(sev_html, body_style),
-                Paragraph(f"<b>{title}</b>", body_style),
-                Paragraph(ftype, body_style),
-                Paragraph(str(evidence)[:140], body_style),
-                Paragraph(f"<b>{rstatus}</b>", body_style)
+                Paragraph(f"<b>{_safe_xml(title)}</b>", body_style),
+                Paragraph(_safe_xml(ftype), body_style),
+                Paragraph(_safe_xml(str(evidence)[:140]), body_style),
+                Paragraph(f"<b>{_safe_xml(rstatus)}</b>", body_style)
             ])
 
         findings_table = Table(findings_data, colWidths=[65, 125, 80, 180, 90])
@@ -360,7 +465,7 @@ def generate_report(
         ],
         [
             Paragraph("<b>Risk Classification</b>", body_style),
-            Paragraph(f"<b>{risk_band} Risk</b>", body_style),
+            Paragraph(f"<b>{_safe_xml(risk_band)} Risk</b>", body_style),
             Paragraph(
                 f"Findings breakdown: {sev_counts['critical']} Critical, "
                 f"{sev_counts['high']} High, {sev_counts['medium']} Medium, "
@@ -404,13 +509,13 @@ def generate_report(
             details = _get_val(a, "details", "")
             prev_h = _get_val(a, "previous_hash") or _get_val(a, "prev_hash") or ""
             entry_h = _get_val(a, "entry_hash") or _get_val(a, "hash") or ""
-            hash_info = f"<br/><font size='7' color='#64748b'>Block: {entry_h[:16]}... | Prev: {prev_h[:16]}...</font>" if entry_h else ""
+            hash_info = f"<br/><font size='7' color='#64748b'>Block: {_safe_xml(entry_h[:16])}... | Prev: {_safe_xml(prev_h[:16])}...</font>" if entry_h else ""
 
             audit_data.append([
                 Paragraph(ts_str, body_style),
-                Paragraph(f"<b>{actor}</b>", body_style),
-                Paragraph(action, body_style),
-                Paragraph(f"{str(details)[:140]}{hash_info}", body_style)
+                Paragraph(f"<b>{_safe_xml(actor)}</b>", body_style),
+                Paragraph(_safe_xml(action), body_style),
+                Paragraph(f"{_safe_xml(str(details)[:140])}{hash_info}", body_style)
             ])
 
         audit_table = Table(audit_data, colWidths=[90, 85, 115, 250])
@@ -423,5 +528,13 @@ def generate_report(
         ]))
         story.append(audit_table)
 
-    doc.build(story, canvasmaker=NumberedCanvas)
-    return buffer.getvalue()
+    try:
+        canvas_maker = _get_canvas_maker()
+        if canvas_maker:
+            doc.build(story, canvasmaker=canvas_maker)
+        else:
+            doc.build(story)
+        return buffer.getvalue()
+    except Exception as exc:
+        logger.error("ReportLab document build failed: %s, falling back to basic valid PDF", exc, exc_info=True)
+        return _generate_fallback_pdf(app_id, inst_name, risk_band)

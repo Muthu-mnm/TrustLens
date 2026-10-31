@@ -30,7 +30,7 @@ export default function Home() {
     setLoading(true)
     try {
       const response = await listApplications()
-      const data = response.data || []
+      const data = Array.isArray(response.data) ? response.data : []
       setApplications(data)
       if (showToast) {
         toast.success(`Refreshed ${data.length} applications`)
@@ -49,7 +49,7 @@ export default function Home() {
     fetchApplicationsList()
   }, [])
 
-  const applications = state.applications || []
+  const applications = Array.isArray(state.applications) ? state.applications : []
 
   // Stats calculation
   const stats = useMemo(() => {

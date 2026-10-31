@@ -22,7 +22,12 @@ export const ACTION_TYPES = {
 function storeReducer(state, action) {
   switch (action.type) {
     case ACTION_TYPES.SET_APPLICATIONS:
-      return { ...state, applications: action.payload, isLoading: false, error: null }
+      return {
+        ...state,
+        applications: Array.isArray(action.payload) ? action.payload : [],
+        isLoading: false,
+        error: null,
+      }
     case ACTION_TYPES.SET_CURRENT_APPLICATION:
       return { ...state, currentApplication: action.payload, isLoading: false, error: null }
     case ACTION_TYPES.SET_RESULTS:

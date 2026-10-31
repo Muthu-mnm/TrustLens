@@ -3,8 +3,7 @@ import io
 import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -96,8 +95,11 @@ def get_report(app_id: str, db: Session = Depends(get_db)):
 
     safe_app_code = re.sub(r"[^\w\-]", "_", str(app_obj.app_id))
     filename = f"TrustLens_Report_{safe_app_code}.pdf"
-    return StreamingResponse(
-        io.BytesIO(pdf_bytes),
+    return Response(
+        content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
     )

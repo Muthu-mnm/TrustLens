@@ -1,29 +1,57 @@
 import React, { useState } from 'react'
-import { FileDown, FileCheck, Shield, Clock, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { FileDown, FileCheck, Shield, Clock, AlertTriangle, CheckCircle2, Eye } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { downloadReport } from '../../api/client'
 
 export default function ReportDownload({ application, results }) {
   const [downloading, setDownloading] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
 
   if (!application) return null
 
+  const getReportBlob = async () => {
+    const response = await downloadReport(application.id)
+    const blob = response.data instanceof Blob
+      ? response.data
+      : new Blob([response.data], { type: 'application/pdf' })
+
+    if (blob.size === 0) {
+      throw new Error('Received an empty report from the scrutiny engine.')
+    }
+
+    if (blob.size < 200) {
+      try {
+        const text = await blob.text()
+        if (text.startsWith('{') || text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+          let errDetail = 'Server returned an invalid response instead of a PDF report.'
+          try {
+            const parsed = JSON.parse(text)
+            if (parsed.detail) errDetail = parsed.detail
+          } catch {}
+          throw new Error(errDetail)
+        }
+      } catch (e) {
+        if (e.message) throw e
+      }
+    }
+
+    return blob
+  }
+
   const handleDownload = async () => {
     setDownloading(true)
-    const toastId = toast.loading('Generating and downloading scrutiny report...')
+    const toastId = toast.loading('Generating scrutiny dossier...')
     try {
-      const response = await downloadReport(application.id)
-
-      // Create blob link to trigger download
-      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const blob = await getReportBlob()
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `TrustLens_Scrutiny_Report_${application.app_id || application.id}.pdf`)
+      const safeId = (application.app_id || application.id).replace(/[^\w\-]/g, '_')
+      link.setAttribute('download', `TrustLens_Scrutiny_Report_${safeId}.pdf`)
       document.body.appendChild(link)
       link.click()
       link.parentNode.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      setTimeout(() => window.URL.revokeObjectURL(url), 30000)
 
       toast.success('Report downloaded successfully!', { id: toastId })
     } catch (err) {
@@ -31,6 +59,23 @@ export default function ReportDownload({ application, results }) {
       toast.error(err.message || 'Failed to download scrutiny report.', { id: toastId })
     } finally {
       setDownloading(false)
+    }
+  }
+
+  const handlePreview = async () => {
+    setPreviewing(true)
+    const toastId = toast.loading('Opening scrutiny report preview...')
+    try {
+      const blob = await getReportBlob()
+      const url = window.URL.createObjectURL(blob)
+      window.open(url, '_blank')
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+      toast.success('Report opened in new tab!', { id: toastId })
+    } catch (err) {
+      console.error('Failed to preview report:', err)
+      toast.error(err.message || 'Failed to preview scrutiny report.', { id: toastId })
+    } finally {
+      setPreviewing(false)
     }
   }
 
@@ -59,24 +104,45 @@ export default function ReportDownload({ application, results }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleDownload}
-          disabled={downloading}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-blue-700 hover:bg-blue-800 text-white transition-all shadow-md shadow-blue-700/20 disabled:opacity-50 flex-shrink-0"
-        >
-          {downloading ? (
-            <>
-              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-              <span>Generating PDF...</span>
-            </>
-          ) : (
-            <>
-              <FileDown className="w-4 h-4" />
-              <span>Download PDF Report</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <button
+            type="button"
+            onClick={handlePreview}
+            disabled={previewing || downloading}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm disabled:opacity-50 flex-shrink-0"
+          >
+            {previewing ? (
+              <>
+                <span className="w-4 h-4 border-2 border-slate-500 border-t-transparent rounded-full animate-spin"></span>
+                <span>Opening...</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-4 h-4 text-slate-500" />
+                <span>Preview</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading || previewing}
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-blue-700 hover:bg-blue-800 text-white transition-all shadow-md shadow-blue-700/20 disabled:opacity-50 flex-shrink-0"
+          >
+            {downloading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Generating PDF...</span>
+              </>
+            ) : (
+              <>
+                <FileDown className="w-4 h-4" />
+                <span>Download PDF Report</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}

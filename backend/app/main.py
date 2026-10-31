@@ -78,6 +78,10 @@ def health_check():
     from app.services.ocr_service import HAVE_TESSERACT
     tess_status = "available" if HAVE_TESSERACT else "unavailable (graceful fallback active)"
 
+    import sys
+    from app.services import report_service
+    rl_status = f"available (HAVE_REPORTLAB={report_service.HAVE_REPORTLAB})" if report_service._ensure_reportlab() else "unavailable"
+
     is_healthy = db_status == "connected" and storage_status == "writable"
     status_str = "ok" if is_healthy else "degraded"
 
@@ -85,10 +89,12 @@ def health_check():
         "status": status_str,
         "version": "1.0.0",
         "service": "TrustLens API",
+        "python_executable": sys.executable,
         "dependencies": {
             "database": db_status,
             "storage": storage_status,
             "tesseract_ocr": tess_status,
+            "reportlab": rl_status,
         },
     }
 
